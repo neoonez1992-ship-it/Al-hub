@@ -1,0 +1,346 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI HUB — агрегатор искусственного интеллекта</title>
+<style>
+:root{--bg:#0d0e16;--panel:#171a27;--panel2:#202438;--line:#30364b;--txt:#f4f5ff;--muted:#929bb5;--accent:#8875ff;--green:#48d6a0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px Arial,sans-serif}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+.app{max-width:1250px;margin:auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0 20px}
+.logo{font-size:25px;font-weight:800;letter-spacing:1px}
+.logo span{color:var(--accent)}
+.status{font-size:12px;color:var(--green)}
+.layout{display:grid;grid-template-columns:270px 1fr;gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px}
+h3{font-size:15px;margin:0 0 13px}
+.muted{color:var(--muted);font-size:12px;line-height:1.5}
+.section{margin-bottom:20px}
+button,select,input,textarea{border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--txt);padding:11px}
+button.primary{background:var(--accent);border-color:var(--accent);color:white;font-weight:bold}
+button:hover{filter:brightness(1.12)}
+button:disabled{opacity:.5;cursor:not-allowed}
+select,input{width:100%}
+.full{width:100%}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{min-width:0}
+.tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}
+.tab{font-size:13px}
+.tab.active{background:var(--accent);border-color:var(--accent)}
+.chat{height:55vh;min-height:350px;overflow:auto;padding:12px;background:#11131e;border:1px solid var(--line);border-radius:12px}
+.msg{padding:12px 14px;border-radius:12px;margin:9px 0;max-width:90%;white-space:pre-wrap;line-height:1.5;overflow-wrap:anywhere}
+.user{background:#343052;margin-left:auto}
+.bot{background:#202438}
+.msg small{display:block;color:var(--muted);font-size:11px;margin-bottom:6px}
+.composer{margin-top:12px}
+textarea{width:100%;resize:vertical;min-height:75px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.actions button{flex:1}
+.filepreview{display:flex;gap:10px;align-items:center;margin-top:10px}
+.filepreview img{width:75px;height:75px;object-fit:cover;border-radius:9px}
+.catalog{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.model{background:var(--panel2);padding:13px;border-radius:11px;border:1px solid var(--line)}
+.model strong{display:block;margin-bottom:8px;overflow-wrap:anywhere}
+.model p{font-size:12px;color:var(--muted);line-height:1.5}
+.tag{display:inline-block;padding:4px 7px;background:#343052;border-radius:6px;font-size:11px;margin:3px 3px 3px 0}
+.hidden{display:none!important}
+#notice{font-size:12px;color:var(--muted);margin-top:8px}
+footer{padding:20px;text-align:center;color:var(--muted);font-size:11px}
+@media(max-width:750px){.layout{grid-template-columns:1fr}.chat{height:50vh}.app{padding:10px}.logo{font-size:21px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+ <div class="logo">AI <span>HUB</span></div>
+ <div class="status" id="status">● Подключение...</div>
+</header>
+
+<div class="layout">
+<aside class="panel">
+ <div class="section">
+  <h3>Режим работы</h3>
+  <select id="mode">
+   <option value="auto">Автоматический выбор ИИ</option>
+   <option value="manual">Выбирать вручную</option>
+  </select>
+  <p class="muted">AI HUB подберёт подходящую модель по содержанию запроса.</p>
+ </div>
+ <div class="section">
+  <h3>Модель</h3>
+  <select id="model"><option value="">Загрузка моделей...</option></select>
+  <p class="muted" id="modelInfo">Модель выбирается автоматически.</p>
+ </div>
+ <div class="section">
+  <h3>Каталог моделей</h3>
+  <input id="search" placeholder="Поиск модели..." />
+  <p class="muted">Бесплатные модели OpenRouter. Описание возможностей формируется по названию модели.</p>
+  <button class="full" id="reload">Обновить каталог</button>
+ </div>
+ <div class="section">
+  <h3>Инструменты</h3>
+  <button class="full" id="clear">Очистить диалог</button>
+  <button class="full" id="compareOpen" style="margin-top:8px">Сравнить модели</button>
+ </div>
+ <div class="muted" id="count">Модели: загрузка...</div>
+</aside>
+
+<main class="panel">
+ <div class="tabs">
+  <button class="tab active" data-tab="chat">Чат</button>
+  <button class="tab" data-tab="catalog">Каталог ИИ</button>
+  <button class="tab" data-tab="compare">Сравнение</button>
+ </div>
+
+ <section id="chatTab">
+  <div class="chat" id="chat">
+   <div class="msg bot"><small>AI HUB</small>Привет! Я единый интерфейс для моделей искусственного интеллекта. Напиши задачу, и я помогу подобрать подходящую модель.</div>
+  </div>
+  <div class="composer">
+   <textarea id="prompt" placeholder="Напиши свой запрос..."></textarea>
+   <div class="row" style="margin-top:8px">
+    <label class="full">
+     <span class="muted">Прикрепить изображение</span>
+     <input type="file" id="image" accept="image/*">
+    </label>
+   </div>
+   <div id="preview" class="filepreview hidden"></div>
+   <div class="actions">
+    <button class="primary" id="send">Отправить</button>
+    <button id="removeImage">Убрать фото</button>
+   </div>
+   <div id="notice">Автоматический режим подбирает модель из доступного каталога.</div>
+  </div>
+ </section>
+
+ <section id="catalogTab" class="hidden">
+  <h3>Каталог искусственного интеллекта</h3>
+  <div class="catalog" id="catalog"></div>
+ </section>
+
+ <section id="compareTab" class="hidden">
+  <h3>Сравнение моделей</h3>
+  <p class="muted">Выбери до трёх моделей и отправь им один запрос.</p>
+  <div id="compareModels"></div>
+  <textarea id="comparePrompt" placeholder="Запрос для сравнения..." style="margin-top:12px"></textarea>
+  <button class="primary full" id="compare">Сравнить ответы</button>
+  <div id="compareResults"></div>
+ </section>
+</main>
+</div>
+<footer>AI HUB · Единая платформа искусственного интеллекта</footer>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let models=[];
+let history=[];
+let imageData=null;
+let busy=false;
+
+function description(id){
+ const s=id.toLowerCase();
+ const parts=[];
+ if(/vision|vl-|llava|gemini|pixtral|qwen.*vl/.test(s))
+  parts.push("Работа с изображениями и визуальный анализ");
+ if(/coder|code|codestral|deepseek/.test(s))
+  parts.push("Программирование, код и технические задачи");
+ if(/reason|think|r1|o1|o3|qwq/.test(s))
+  parts.push("Логика, сложные задачи и рассуждения");
+ if(/llama|mistral|qwen|gemma|gpt|phi/.test(s))
+  parts.push("Универсальный помощник для общения и текстов");
+ if(!parts.length)parts.push("Универсальная языковая модель ИИ");
+ return parts.join(". ")+".";
+}
+
+function chooseModel(prompt){
+ const p=prompt.toLowerCase();
+ let candidates=models;
+ if(/фото|картин|изображ|рисунк|что на снимке|опиши снимок/.test(p)){
+  const vision=models.filter(m=>/vision|vl-|llava|gemini|pixtral/.test(m.id.toLowerCase()));
+  if(vision.length)return vision[0];
+ }
+ if(/код|программ|сайт|приложен|python|javascript|html|ошибк/.test(p)){
+  const code=models.filter(m=>/coder|code|codestral|deepseek/.test(m.id.toLowerCase()));
+  if(code.length)return code[0];
+ }
+ if(/проанализ|сравни|рассуж|почему|реши задачу|математ/.test(p)){
+  const reason=models.filter(m=>/reason|think|r1|qwq/.test(m.id.toLowerCase()));
+  if(reason.length)return reason[0];
+ }
+ return candidates[0]||null;
+}
+
+function renderModels(){
+ const selected=$("search").value.toLowerCase();
+ const list=models.filter(m=>(m.id+" "+m.name).toLowerCase().includes(selected));
+ $("catalog").innerHTML="";
+ list.forEach(m=>{
+  const el=document.createElement("div");
+  el.className="model";
+  el.innerHTML="<strong></strong><p></p><span class='tag'>Бесплатная в каталоге</span><span class='tag'>OpenRouter</span>";
+  el.querySelector("strong").textContent=m.name;
+  el.querySelector("p").textContent=description(m.id);
+  $("catalog").appendChild(el);
+ });
+ $("count").textContent="Моделей загружено: "+models.length;
+}
+
+async function loadModels(){
+ $("status").textContent="● Подключение...";
+ try{
+  const r=await fetch("/api/models");
+  const data=await r.json();
+  if(!r.ok)throw Error(data.error||"Ошибка загрузки");
+  models=(data.models||[]).map(m=>({id:m.id,name:m.name||m.id}));
+  if(!models.length)throw Error("Список моделей пуст");
+  $("model").innerHTML="";
+  models.forEach(m=>{
+   const o=document.createElement("option");
+   o.value=m.id;o.textContent=m.name;
+   $("model").appendChild(o);
+  });
+  $("status").textContent="● Сервер подключён";
+  renderModels();
+  renderCompare();
+ }catch(e){
+  $("status").textContent="● Ошибка подключения";
+  $("model").innerHTML="<option>Не удалось загрузить модели</option>";
+  $("count").textContent=e.message;
+ }
+}
+
+function renderCompare(){
+ $("compareModels").innerHTML="";
+ models.slice(0,60).forEach((m,i)=>{
+  const label=document.createElement("label");
+  label.style.display="block";
+  label.style.padding="7px";
+  const cb=document.createElement("input");
+  cb.type="checkbox";cb.value=m.id;cb.style.width="auto";
+  cb.checked=i<2;
+  cb.addEventListener("change",()=>{
+   if($("compareModels").querySelectorAll("input:checked").length>3){
+    cb.checked=false;alert("Можно выбрать максимум три модели");
+   }
+  });
+  label.append(cb,document.createTextNode(" "+m.name));
+  $("compareModels").appendChild(label);
+ });
+}
+
+function addMessage(role,text,model=""){
+ const el=document.createElement("div");
+ el.className="msg "+(role==="user"?"user":"bot");
+ const small=document.createElement("small");
+ small.textContent=role==="user"?"Вы":model||"AI HUB";
+ const content=document.createElement("div");
+ content.textContent=text;
+ el.append(small,content);
+ $("chat").appendChild(el);
+ $("chat").scrollTop=$("chat").scrollHeight;
+}
+
+async function send(){
+ if(busy)return;
+ const prompt=$("prompt").value.trim();
+ if(!prompt&&!imageData)return;
+ if(!models.length){alert("Модели ещё не загружены");return;}
+ if(imageData){
+  alert("Для анализа изображений необходимо сначала обновить сервер app.py. Сейчас завершим настройку интерфейса, затем подключим полноценный анализ фото.");
+  return;
+ }
+ const model=$("mode").value==="auto"?chooseModel(prompt):models.find(m=>m.id===$("model").value);
+ if(!model){alert("Не удалось выбрать модель");return;}
+ const manual=$("mode").value==="manual";
+ if(manual)history=[];
+ addMessage("user",prompt);
+ $("prompt").value="";
+ const oldHistory=history.slice();
+ history.push({role:"user",content:prompt});
+ busy=true;$("send").disabled=true;$("send").textContent="Думаю...";
+ try{
+  const r=await fetch("/api/chat",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({model:model.id,prompt,history:oldHistory})
+  });
+  const data=await r.json();
+  if(!r.ok)throw Error(data.error||"Ошибка запроса");
+  addMessage("assistant",data.answer,model.name);
+  history.push({role:"assistant",content:data.answer});
+  $("modelInfo").textContent="Последний ответ: "+model.name+(manual?" (ручной выбор)":" (автоматический выбор)");
+ }catch(e){
+  addMessage("assistant","Ошибка: "+e.message);
+ }finally{
+  busy=false;$("send").disabled=false;$("send").textContent="Отправить";
+ }
+}
+
+async function compare(){
+ const chosen=[...$("compareModels").querySelectorAll("input:checked")].map(x=>x.value);
+ const prompt=$("comparePrompt").value.trim();
+ if(!prompt||!chosen.length){alert("Напиши запрос и выбери модели");return;}
+ $("compare").disabled=true;
+ $("compareResults").textContent="Получаем ответы...";
+ try{
+  const r=await fetch("/api/compare",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({prompt,models:chosen})
+  });
+  const data=await r.json();
+  if(!r.ok)throw Error(data.error||"Ошибка сравнения");
+  $("compareResults").innerHTML="";
+  data.results.forEach(x=>{
+   const el=document.createElement("div");el.className="model";
+   const title=document.createElement("strong");title.textContent=x.model;
+   const answer=document.createElement("p");answer.textContent=x.answer||x.error||"Нет ответа";
+   el.append(title,answer);$("compareResults").appendChild(el);
+  });
+ }catch(e){$("compareResults").textContent=e.message;}
+ finally{$("compare").disabled=false;}
+}
+
+$("send").onclick=send;
+$("prompt").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
+$("reload").onclick=loadModels;
+$("search").oninput=renderModels;
+$("compare").onclick=compare;
+$("compareOpen").onclick=()=>switchTab("compare");
+$("clear").onclick=()=>{history=[];$("chat").innerHTML="";addMessage("assistant","Диалог очищен.");};
+$("removeImage").onclick=()=>{imageData=null;$("image").value="";$("preview").classList.add("hidden");};
+$("image").onchange=async e=>{
+ const f=e.target.files[0];if(!f)return;
+ if(!f.type.startsWith("image/"))return alert("Выбери изображение");
+ if(f.size>8*1024*1024)return alert("Максимальный размер изображения — 8 МБ");
+ imageData=await new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=()=>resolve(reader.result);
+  reader.onerror=reject;reader.readAsDataURL(f);
+ });
+ $("preview").classList.remove("hidden");
+ $("preview").innerHTML="";
+ const img=document.createElement("img");img.src=imageData;
+ const name=document.createElement("span");name.textContent=f.name;
+ $("preview").append(img,name);
+};
+
+function switchTab(tab){
+ ["chat","catalog","compare"].forEach(x=>{
+  $(x+"Tab").classList.toggle("hidden",x!==tab);
+ });
+ document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));
+}
+document.querySelectorAll(".tab").forEach(x=>x.onclick=()=>switchTab(x.dataset.tab));
+$("mode").onchange=()=>{
+ $("model").disabled=$("mode").value==="auto";
+ $("modelInfo").textContent=$("mode").value==="auto"?"Модель выбирается автоматически.":"Выбери модель вручную.";
+};
+loadModels();
+</script>
+</body>
+</html>
