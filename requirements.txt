@@ -1,0 +1,1 @@
+Flask>=3,<4\nrequests>=2.31,<3\ngunicorn>=22,<24\n

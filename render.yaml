@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ai-hub-aggregator
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
