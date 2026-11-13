@@ -34,19 +34,20 @@ def require_key():
 
 
 def upstream(method, path, **kwargs):
-    r = requests.request(
+    response = requests.request(
         method,
         BASE + path,
         headers=headers(),
         timeout=TIMEOUT,
         **kwargs
     )
-    try:
-        data = r.json()
-    except Exception:
-        data = {"error": r.text[:1000]}
 
-    if not r.ok:
+    try:
+        data = response.json()
+    except Exception:
+        data = {"error": response.text[:1000]}
+
+    if not response.ok:
         error = data.get("error", data)
         if isinstance(error, dict):
             error = error.get("message", str(error))
@@ -68,10 +69,26 @@ def get_image_models():
 
 
 def is_vision(model):
-    modalities = (
-        model.get("architecture") or {}
-    ).get("input_modalities", [])
+    architecture = model.get("architecture") or {}
+    modalities = architecture.get("input_modalities") or []
     return "image" in modalities
+
+
+def is_free(model):
+    model_id = str(model.get("id", "")).lower()
+
+    if model_id.endswith(":free"):
+        return True
+
+    pricing = model.get("pricing") or {}
+
+    try:
+        prompt_price = float(pricing.get("prompt", 1))
+        completion_price = float(pricing.get("completion", 1))
+
+        return prompt_price == 0 and completion_price == 0
+    except (ValueError, TypeError):
+        return False
 
 
 def describe_model(model):
@@ -101,18 +118,52 @@ def describe_model(model):
 def choose_model(prompt, has_images=False, requested="auto"):
     catalog = get_models()
 
+    # Оставляем только бесплатные модели.
+    candidates = [
+        model for model in catalog
+        if is_free(model)
+    ]
+
+    # Для изображений нужны модели с поддержкой картинок.
+    if has_images:
+        candidates = [
+            model for model in candidates
+            if is_vision(model)
+        ]
+
+    # Ручной выбор.
     if requested and requested != "auto":
-        model = next(
+        selected = next(
             (m for m in catalog if m.get("id") == requested),
             None
         )
-        if not model:
+
+        if not selected:
             raise RuntimeError("Модель отсутствует в каталоге.")
-        if has_images and not is_vision(model):
+
+        if not is_free(selected):
+            raise RuntimeError(
+                "Эта модель платная. Выбери бесплатную модель "
+                "или включи автоматический режим."
+            )
+
+        if has_images and not is_vision(selected):
             raise RuntimeError(
                 "Выбранная модель не поддерживает изображения."
             )
-        return model
+
+        return selected
+
+    if not candidates:
+        if has_images:
+            raise RuntimeError(
+                "Сейчас не найдено бесплатных моделей "
+                "с поддержкой изображений."
+            )
+
+        raise RuntimeError(
+            "Сейчас не найдено доступных бесплатных моделей."
+        )
 
     text = (prompt or "").lower()
 
@@ -128,29 +179,21 @@ def choose_model(prompt, has_images=False, requested="auto"):
         text
     ))
 
-    candidates = [
-        m for m in catalog
-        if not has_images or is_vision(m)
-    ]
-
-    if not candidates:
-        raise RuntimeError(
-            "Нет доступных моделей с поддержкой изображений."
-        )
-
     def score(model):
         name = (
-            model.get("id", "") + " " +
-            model.get("name", "")
+            str(model.get("id", "")) + " " +
+            str(model.get("name", ""))
         ).lower()
 
         points = 0
 
-        if coding and re.search(r"coder|codestral|code|deepseek", name):
+        if coding and re.search(
+            r"coder|codestral|code|deepseek", name
+        ):
             points += 8
 
         if reasoning and re.search(
-            r"reason|thinking|r1|qwq|opus|sonnet", name
+            r"reason|thinking|r1|qwq|deepseek", name
         ):
             points += 7
 
@@ -162,19 +205,12 @@ def choose_model(prompt, has_images=False, requested="auto"):
         if has_images and is_vision(model):
             points += 10
 
-        pricing = model.get("pricing") or {}
-
         try:
-            if (
-                float(pricing.get("prompt", 1)) == 0
-                and float(pricing.get("completion", 1)) == 0
-            ):
-                points += 1.5
+            context = int(model.get("context_length") or 0)
+            if context >= 32000:
+                points += 1
         except (ValueError, TypeError):
             pass
-
-        if model.get("context_length", 0) >= 32000:
-            points += 0.5
 
         return points
 
@@ -205,6 +241,21 @@ def get_answer(result):
     return str(content)
 
 
+def extract_images(result):
+    images = []
+
+    for item in result.get("data", []):
+        if item.get("url"):
+            images.append(item["url"])
+        elif item.get("b64_json"):
+            media = item.get("media_type") or "image/png"
+            images.append(
+                f"data:{media};base64,{item['b64_json']}"
+            )
+
+    return images
+
+
 @app.get("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -215,7 +266,8 @@ def health():
     return jsonify({
         "ok": True,
         "configured": bool(API_KEY),
-        "service": "AI HUB"
+        "service": "AI HUB",
+        "free_only": True
     })
 
 
@@ -229,23 +281,19 @@ def models():
         catalog = get_models()
         result = []
 
-        for m in catalog:
-            pricing = m.get("pricing") or {}
+        for model in catalog:
+            pricing = model.get("pricing") or {}
 
             result.append({
-                "id": m.get("id"),
-                "name": m.get("name") or m.get("id"),
-                "description": describe_model(m),
-                "context_length": m.get("context_length"),
-                "vision": is_vision(m),
+                "id": model.get("id"),
+                "name": model.get("name") or model.get("id"),
+                "description": describe_model(model),
+                "context_length": model.get("context_length"),
+                "vision": is_vision(model),
                 "pricing": pricing,
-                "free": (
-                    pricing.get("prompt") == "0"
-                    and pricing.get("completion") == "0"
-                )
+                "free": is_free(model)
             })
 
-        # Keep compatibility with the original API.
         return jsonify({
             "models": result,
             "data": result,
@@ -263,7 +311,15 @@ def image_models():
         return error
 
     try:
-        return jsonify({"data": get_image_models()})
+        catalog = get_image_models()
+
+        free_models = [
+            model for model in catalog
+            if is_free(model)
+        ]
+
+        return jsonify({"data": free_models})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
@@ -281,7 +337,6 @@ def chat():
         image = data.get("image")
         mode = data.get("mode", "auto")
 
-        # Support both the new frontend and the old API.
         requested = (
             data.get("model", "auto")
             if mode == "manual"
@@ -290,13 +345,10 @@ def chat():
 
         messages = data.get("history") or data.get("messages") or []
 
-        if not messages:
-            messages = []
-
         messages = [
-            m for m in messages
-            if isinstance(m, dict)
-            and m.get("role") in ("user", "assistant")
+            message for message in messages
+            if isinstance(message, dict)
+            and message.get("role") in ("user", "assistant")
         ][-20:]
 
         has_images = bool(image)
@@ -308,12 +360,16 @@ def chat():
 
         if image:
             content = [
-                {"type": "text", "text": prompt or "Проанализируй изображение."},
+                {
+                    "type": "text",
+                    "text": prompt or "Проанализируй изображение."
+                },
                 {
                     "type": "image_url",
                     "image_url": {"url": image}
                 }
             ]
+
             messages.append({
                 "role": "user",
                 "content": content
@@ -367,6 +423,7 @@ def compare():
 
     try:
         data = request.get_json(force=True) or {}
+
         prompt = str(data.get("prompt") or "").strip()
         ids = data.get("models") or []
 
@@ -376,15 +433,27 @@ def compare():
             }), 400
 
         catalog = get_models()
-        available = {m.get("id") for m in catalog}
+        available = {
+            model.get("id"): model
+            for model in catalog
+        }
 
         results = []
 
         for model_id in ids[:3]:
-            if model_id not in available:
+            model = available.get(model_id)
+
+            if not model:
                 results.append({
                     "model": model_id,
                     "error": "Модель отсутствует в каталоге."
+                })
+                continue
+
+            if not is_free(model):
+                results.append({
+                    "model": model_id,
+                    "error": "Платная модель заблокирована."
                 })
                 continue
 
@@ -432,22 +501,36 @@ def generate_image():
         prompt = str(data.get("prompt") or "").strip()
 
         if not prompt:
-            return jsonify({"error": "Напиши описание изображения."}), 400
+            return jsonify({
+                "error": "Напиши описание изображения."
+            }), 400
 
         catalog = get_image_models()
+
+        free_models = [
+            model for model in catalog
+            if is_free(model)
+        ]
+
         requested = data.get("model", "auto")
 
         if requested == "auto":
-            chosen = catalog[0] if catalog else None
+            chosen = free_models[0] if free_models else None
         else:
             chosen = next(
-                (m for m in catalog if m.get("id") == requested),
+                (
+                    model for model in free_models
+                    if model.get("id") == requested
+                ),
                 None
             )
 
         if not chosen:
             return jsonify({
-                "error": "Модель генерации не найдена."
+                "error": (
+                    "Не найдена бесплатная модель генерации "
+                    "изображений. Платные модели заблокированы."
+                )
             }), 400
 
         result = upstream(
@@ -461,16 +544,7 @@ def generate_image():
             }
         )
 
-        images = []
-
-        for item in result.get("data", []):
-            if item.get("url"):
-                images.append(item["url"])
-            elif item.get("b64_json"):
-                media = item.get("media_type") or "image/png"
-                images.append(
-                    f"data:{media};base64,{item['b64_json']}"
-                )
+        images = extract_images(result)
 
         return jsonify({
             "model": chosen["id"],
@@ -490,6 +564,7 @@ def edit_image():
 
     try:
         data = request.get_json(force=True) or {}
+
         prompt = str(data.get("prompt") or "").strip()
         image = str(data.get("image") or "")
 
@@ -499,27 +574,39 @@ def edit_image():
             }), 400
 
         catalog = get_image_models()
+
+        free_models = [
+            model for model in catalog
+            if is_free(model)
+        ]
+
         requested = data.get("model", "auto")
 
         if requested == "auto":
             chosen = next(
                 (
-                    m for m in catalog
+                    model for model in free_models
                     if "input_references" in (
-                        m.get("supported_parameters") or []
+                        model.get("supported_parameters") or []
                     )
                 ),
                 None
             )
         else:
             chosen = next(
-                (m for m in catalog if m.get("id") == requested),
+                (
+                    model for model in free_models
+                    if model.get("id") == requested
+                ),
                 None
             )
 
         if not chosen:
             return jsonify({
-                "error": "Модель редактирования не найдена."
+                "error": (
+                    "Не найдена бесплатная модель редактирования "
+                    "изображений. Платные модели заблокированы."
+                )
             }), 400
 
         result = upstream(
@@ -533,16 +620,7 @@ def edit_image():
             }
         )
 
-        images = []
-
-        for item in result.get("data", []):
-            if item.get("url"):
-                images.append(item["url"])
-            elif item.get("b64_json"):
-                media = item.get("media_type") or "image/png"
-                images.append(
-                    f"data:{media};base64,{item['b64_json']}"
-                )
+        images = extract_images(result)
 
         return jsonify({
             "model": chosen["id"],
